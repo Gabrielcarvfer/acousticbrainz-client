@@ -71,17 +71,25 @@ def process_file(shared_dict, filepath):
     _start_progress(shared_dict["lock"], filepath)
 
     tmpname = os.path.basename(filepath)+'_.json'
+    pending_tmpname = "features/pending/"+tmpname
+
+    # If features haven't been extracted yet, extract them
     if tmpname not in shared_dict["processed_files"]:
         # The extractor doesn't seem to handle utf-8 properly, so we write to a temporary file
         thread_tmpname = str(threading.get_ident())+".json"
         retcode, out = run_extractor(shared_dict["essentia_path"], filepath, thread_tmpname)
         shutil.move(thread_tmpname, "features/pending/"+tmpname)
+
+        # Insert extractor sha for reference
+        with open(pending_tmpname, "r") as f:
+            features = json.load(f)
+        features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
+        with open(pending_tmpname, "w") as f:
+            json.dump(features, f, indent=3)
     else:
         retcode = 0
 
     # If we are at this point, the features file will be at features/pending
-    pending_tmpname = "features/pending/"+tmpname
-
     if retcode == 2:
         _update_progress(shared_dict["lock"], filepath, "No MBID", RED)
         shutil.move(pending_tmpname, "features/failed/nombid/"+tmpname)
@@ -98,15 +106,10 @@ def process_file(shared_dict, filepath):
         print()
         print(out)
     else:
-        if os.path.isfile(pending_tmpname):
+        if os.path.isfile(pending_tmpname) and not shared_dict["offline"]:
             try:
-                # Insert extractor sha for reference
                 with open(pending_tmpname, "r") as f:
                     features = json.load(f)
-                features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
-                with open(pending_tmpname, "w") as f:
-                    json.dump(features, f, indent=3)
-
                 # Recording MBIDs are tagged with _trackid for historic reasons
                 recordingids = features["metadata"]["tags"]["musicbrainz_trackid"]
                 if not isinstance(recordingids, list):

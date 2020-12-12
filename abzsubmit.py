@@ -24,18 +24,18 @@ def create_folder(path):
     if not os.path.exists(path):
         os.mkdir(path)
 
-def main(paths):
+def main(paths, offline):
     from abz.acousticbrainz import scan_files_to_process, process_file
     import multiprocessing as mp
     import multiprocessing.dummy as dummy
     import hashlib
     from threading import Lock
-    import json
 
     # Precompute extractor sha1
     h = hashlib.sha1()
     h.update(open(essentia_path, "rb").read())
     essentia_build_sha = h.hexdigest()
+    del h
 
     # Get list of files to process
     files_to_process = scan_files_to_process(paths, supported_extensions)
@@ -44,8 +44,10 @@ def main(paths):
     shared_dict = {}
     shared_dict["essentia_path"] = essentia_path
     shared_dict["essentia_build_sha"] = essentia_build_sha
+    shared_dict["offline"] = offline
     shared_dict["host"] = host_address
     shared_dict["lock"] = Lock()
+    del essentia_build_sha
 
     # Create folder structure for failed/pending/successful submissions
     create_folder("features")
@@ -98,8 +100,16 @@ if __name__ == "__main__":
     from multiprocessing import freeze_support
     freeze_support()
 
+    import argparse
+    parser = argparse.ArgumentParser(description='Extract acoustic features from songs.')
+    parser.add_argument('-o', '--offline', type=bool, default=False,
+                        help='Extract features but skip submission (default: False)')
+    parser.add_argument('-p', '--path-list', nargs="*")
+
     if len(sys.argv) < 2:
-        print("usage: abzsubmit [submissionpath [morepath ...]]", file=sys.stderr)
+        parser.print_help()
         sys.exit(1)
 
-    main(sys.argv[1:])
+    args = parser.parse_args()
+
+    main(args.path_list, args.offline)
