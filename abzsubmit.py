@@ -24,7 +24,7 @@ def create_folder(path):
     if not os.path.exists(path):
         os.mkdir(path)
 
-def main(paths, offline):
+def main(paths, offline, reprocess_failed):
     from abz.acousticbrainz import scan_files_to_process, process_file
     import multiprocessing as mp
     import multiprocessing.dummy as dummy
@@ -70,7 +70,8 @@ def main(paths, offline):
             state = error
             error = None
         shared_dict["processed_files"][filename] = (state, error)
-    del path, feature_files, state, error, filename
+    if len(feature_files) > 0:
+        del path, feature_files, state, error, filename
 
     # Retry sending previously saved features by moving them to the pending folder
     resubmit = []
@@ -78,12 +79,26 @@ def main(paths, offline):
         if state == "failed" and error == "submission":
             shutil.move("features/failed/submission/"+filename, "features/pending")
             resubmit.append(filename)
-    del state, error
+    if len(shared_dict["processed_files"]) > 0:
+        del state, error
     for filename in resubmit:
         shared_dict["processed_files"][filename] = ("pending", None)
-    del filename
+    if len(resubmit) > 0:
+        del filename, resubmit
 
-    # Todo: add option to force new extraction (a.k.a. delete previously processed features file)
+    # Reprocess previously saved features that failed
+    if reprocess_failed:
+        resubmit = []
+        for (filename, (state, error)) in shared_dict["processed_files"].items():
+            if state == "failed":
+                shutil.move("features/failed/"+error+"/"+filename, "features/pending")
+                resubmit.append(filename)
+        if len(shared_dict["processed_files"]) > 0:
+            del state, error
+        for filename in resubmit:
+            del shared_dict["processed_files"][filename]
+        if len(resubmit) > 0:
+            del filename, resubmit
 
     try:
         # Pass shared dictionary and files to process to worker threads
@@ -104,6 +119,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Extract acoustic features from songs.')
     parser.add_argument('-o', '--offline', type=bool, default=False,
                         help='Extract features but skip submission (default: False)')
+    parser.add_argument('-rf', '--reprocess-failed', type=bool, default=False,
+                        help='Reprocess features that previously failed (default: False)')
     parser.add_argument('-p', '--path-list', nargs="*")
 
     if len(sys.argv) < 2:
@@ -112,4 +129,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args.path_list, args.offline)
+    main(args.path_list, args.offline, args.reprocess_failed)

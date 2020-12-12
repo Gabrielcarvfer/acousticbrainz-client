@@ -78,13 +78,13 @@ def process_file(shared_dict, filepath):
         # The extractor doesn't seem to handle utf-8 properly, so we write to a temporary file
         thread_tmpname = str(threading.get_ident())+".json"
         retcode, out = run_extractor(shared_dict["essentia_path"], filepath, thread_tmpname)
-        shutil.move(thread_tmpname, "features/pending/"+tmpname)
+        shutil.move(thread_tmpname, pending_tmpname)
 
         # Insert extractor sha for reference
-        with open(pending_tmpname, "r") as f:
+        with open(pending_tmpname, "r", encoding="utf-8") as f:
             features = json.load(f)
         features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
-        with open(pending_tmpname, "w") as f:
+        with open(pending_tmpname, "w", encoding="utf-8") as f:
             json.dump(features, f, indent=3)
     else:
         retcode = 0
