@@ -117,15 +117,25 @@ def process_file(shared_dict, filepath):
                 recs = [r for r in recordingids if is_valid_uuid(r)]
                 if recs:
                     recid = recs[0]
-                    try:
-                        submit_features(shared_dict["host"], recid, features)
+
+                    # Check if someone already submitted the acousticbrainz features
+                    req = requests.get("https://"+shared_dict["host"]+"/"+recid+"/low-level")
+                    duplicate = len(req.json().keys()) > 1
+
+                    # Finally, submit features if not duplicates
+                    if duplicate:
                         shutil.move(pending_tmpname, "features/success/"+tmpname)
-                        _update_progress(shared_dict["lock"], filepath, "Sent", GREEN)
-                    except requests.exceptions.HTTPError as e:
-                        shutil.move(pending_tmpname, "features/failed/submission/"+tmpname)
-                        _update_progress(shared_dict["lock"], filepath, "Error", RED)
-                        print()
-                        print(e.response.text)
+                        _update_progress(shared_dict["lock"], filepath, "Duplicate", GREEN)
+                    else:
+                        try:
+                            submit_features(shared_dict["host"], recid, features)
+                            shutil.move(pending_tmpname, "features/success/"+tmpname)
+                            _update_progress(shared_dict["lock"], filepath, "Sent", GREEN)
+                        except requests.exceptions.HTTPError as e:
+                            shutil.move(pending_tmpname, "features/failed/submission/"+tmpname)
+                            _update_progress(shared_dict["lock"], filepath, "Error", RED)
+                            print()
+                            print(e.response.text)
                 else:
                     _update_progress(shared_dict["lock"], filepath, "Bad MBID", RED)
                     shutil.move(pending_tmpname, "features/failed/badmbid/"+tmpname)
