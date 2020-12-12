@@ -1,15 +1,11 @@
 # Copyright 2014 Music Technology Group - Universitat Pompeu Fabra
+# Copyright 2020 Gabriel Ferreira (@gabrielcarvfer)
 # acousticbrainz-client is available under the terms of the GNU
 # General Public License, version 3 or higher. See COPYING for more details.
-
-from __future__ import print_function
-
 import json
 import os
-import sqlite3
 import subprocess
 import sys
-import tempfile
 import uuid
 
 try:
@@ -17,10 +13,9 @@ try:
 except ImportError:
     from .vendor import requests
 
-from abz import compat, config
 
-config.load_settings()
-conn = sqlite3.connect(config.get_sqlite_file())
+from abz import compat
+
 VERBOSE = False
 
 RESET = "\x1b[0m"
@@ -28,26 +23,21 @@ RED = "\x1b[31m"
 GREEN = "\x1b[32m"
 
 
-def _update_progress(msg, status="...", colour=RESET):
-    if VERBOSE:
-        sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
-        print(msg.encode("ascii", "ignore"))
-    else:
-        sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
-        sys.stdout.write(msg+"\x1b[K\r")
-        sys.stdout.flush()
+def _update_progress(lock, msg, status="...", colour=RESET):
+    with lock:
+        if VERBOSE:
+            sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
+            print(msg.encode("ascii", "ignore"))
+        else:
+            sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
+            sys.stdout.write("%s\x1b[K\r" % msg)
+            sys.stdout.flush()
 
 
-def _start_progress(msg, status="...", colour=RESET):
-    print()
-    _update_progress(msg, status, colour)
-
-
-def add_to_filelist(filepath, reason=None):
-    query = """insert into filelog(filename, reason) values(?, ?)"""
-    c = conn.cursor()
-    c.execute(query, (compat.decode(filepath), reason))
-    conn.commit()
+def _start_progress(lock, msg, status="...", colour=RESET):
+    with lock:
+        print()
+    _update_progress(lock, msg, status, colour)
 
 
 def is_valid_uuid(u):
@@ -58,30 +48,9 @@ def is_valid_uuid(u):
         return False
 
 
-def get_processed_status(filepath):
-    query = """select reason from filelog where filename = ?"""
-    c = conn.cursor()
-    r = c.execute(query, (compat.decode(filepath), ))
-    row = r.fetchone()
-    if row:
-        reason = row[0]
-        # An empty `reason` field means that it was successful
-        if reason is None:
-            colour, reason = GREEN, ":) done"
-        else:
-            # The status is only 10 chars wide (3 for smile) so we
-            # chop the status text to 7
-            colour = RED
-            reason = ":( %s" % reason[:7]
-        return True, (colour, reason)
-    else:
-        return False, None
-
-
-def run_extractor(input_path, output_path):
-    extractor = config.settings["essentia_path"]
-    profile = config.settings["profile_file"]
-    args = [extractor, input_path, output_path, profile]
+def run_extractor(essentia_path, input_path, output_path):
+    extractor = essentia_path
+    args = [extractor, input_path, output_path]
 
     p = subprocess.Popen(args, stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
     (out, err) = p.communicate()
@@ -89,45 +58,47 @@ def run_extractor(input_path, output_path):
     return retcode, out
 
 
-def submit_features(recordingid, features):
+def submit_features(host, recordingid, features):
     featstr = json.dumps(features)
-
-    host = config.settings["host"]
     url = compat.urlunparse(('http', host, '/%s/low-level' % recordingid, '', '', ''))
     r = requests.post(url, data=featstr)
     r.raise_for_status()
 
 
-def process_file(filepath):
-    _start_progress(filepath)
-    processed, reason = get_processed_status(filepath)
-    if processed:
-        colour, status = reason
-        _update_progress(filepath, status, colour)
-        return
+def process_file(shared_dict, filepath):
+    _start_progress(shared_dict["lock"], filepath)
 
-    fd, tmpname = tempfile.mkstemp(suffix='.json')
-    os.close(fd)
-    os.unlink(tmpname)
-    retcode, out = run_extractor(filepath, tmpname)
+    tmpname = os.path.basename(filepath)+'_.json'
+    if not os.path.exists(tmpname):
+        retcode, out = run_extractor(shared_dict["essentia_path"], filepath, tmpname)
+    else:
+        retcode = 0
+
     if retcode == 2:
-        _update_progress(filepath, ":( nombid", RED)
+        _update_progress(shared_dict["lock"], filepath, "No MBID", RED)
         print()
         print(out)
-        add_to_filelist(filepath, "nombid")
     elif retcode == 1:
-        _update_progress(filepath, ":( extract", RED)
+        _update_progress(shared_dict["lock"], filepath, "Failed extraction", RED)
         print()
         print(out)
-        add_to_filelist(filepath, "extractor")
     elif retcode > 0 or retcode < 0:  # Unknown error, not 0, 1, 2
-        _update_progress(filepath, ":( unk %s" % retcode, RED)
+        _update_progress(shared_dict["lock"], filepath, "Unknown error %s" % retcode, RED)
         print()
         print(out)
     else:
         if os.path.isfile(tmpname):
             try:
-                features = json.load(open(tmpname))
+                # Insert extractor sha for reference
+                with open(tmpname, "r") as f:
+                    features = json.load(f)
+
+                if "essentia_build_sha" in features["metadata"]["version"]:
+                    _update_progress(shared_dict["lock"], filepath, "Sent", GREEN)
+                    return
+
+                features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
+
                 # Recording MBIDs are tagged with _trackid for historic reasons
                 recordingids = features["metadata"]["tags"]["musicbrainz_trackid"]
                 if not isinstance(recordingids, list):
@@ -136,43 +107,28 @@ def process_file(filepath):
                 if recs:
                     recid = recs[0]
                     try:
-                        submit_features(recid, features)
+                        submit_features(shared_dict["host"], recid, features)
+                        with open(tmpname, "w") as f:
+                            json.dump(features, f, indent=3)
+                        _update_progress(shared_dict["lock"], filepath, "Sent", GREEN)
                     except requests.exceptions.HTTPError as e:
-                        _update_progress(filepath, ":( submit", RED)
+                        _update_progress(shared_dict["lock"], filepath, "Error", RED)
                         print()
                         print(e.response.text)
-                    add_to_filelist(filepath)
-                    _update_progress(filepath, ":)", GREEN)
                 else:
-                    _update_progress(filepath, ":( badmbid", RED)
-
+                    _update_progress(shared_dict["lock"], filepath, "Bad MBID", RED)
             except ValueError:
-                _update_progress(filepath, ":( json", RED)
-                add_to_filelist(filepath, "json")
-
-    if os.path.isfile(tmpname):
-        os.unlink(tmpname)
+                _update_progress(shared_dict["lock"], filepath, "JSON error", RED)
+                pass
 
 
-def process_directory(directory_path):
-    _start_progress("processing %s" % directory_path)
+def scan_files_to_process(paths, supported_extensions):
+    files_to_process = []
+    for path in paths:
+        print("Processing %s" % path)
+        for dirpath, dirnames, filenames in os.walk(path):
+            for f in filenames:
+                if f.lower().split(".")[-1] in supported_extensions:
+                    files_to_process.append(os.path.abspath(os.path.join(dirpath, f)))
+    return files_to_process
 
-    for dirpath, dirnames, filenames in os.walk(directory_path):
-        for f in filenames:
-            if f.lower().endswith(config.settings["extensions"]):
-                process_file(os.path.abspath(os.path.join(dirpath, f)))
-
-
-def process(path):
-    if not os.path.exists(path):
-        sys.exit(path + " does not exist")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        process_file(path)
-    elif os.path.isdir(path):
-        process_directory(path)
-
-
-def cleanup():
-    if os.path.isfile(config.settings["profile_file"]):
-        os.unlink(config.settings["profile_file"])
