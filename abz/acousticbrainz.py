@@ -31,11 +31,10 @@ def run_extractor(essentia_path, input_path, output_path):
     extractor = essentia_path
     args = [extractor, input_path, output_path]
 
-    p = subprocess.Popen(args, stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
-    (out, err) = p.communicate()
-    retcode = p.returncode
-    return retcode, out
-
+    with subprocess.Popen(args, stderr=subprocess.STDOUT, stdout=subprocess.PIPE) as p:
+       (out, err) = p.communicate()
+       retcode = p.returncode
+       return retcode, out.decode("utf-8")
 
 def submit_features(host, recordingid, features):
     featstr = json.dumps(features)
@@ -56,14 +55,21 @@ def process_file(shared_dict, filepath, state_queue):
         # The extractor doesn't seem to handle utf-8 properly, so we write to a temporary file
         thread_tmpname = str(threading.get_ident())+".json"
         retcode, out = run_extractor(shared_dict["essentia_path"], filepath, thread_tmpname)
-        shutil.move(thread_tmpname, pending_tmpname)
 
-        # Insert extractor sha for reference
-        with open(pending_tmpname, "r", encoding="utf-8") as f:
-            features = json.load(f)
-        features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
-        with open(pending_tmpname, "w", encoding="utf-8") as f:
-            json.dump(features, f, indent=3)
+        try:
+            shutil.move(thread_tmpname, pending_tmpname)
+            # Insert extractor sha for reference
+            with open(pending_tmpname, "r", encoding="utf-8") as f:
+                features = json.load(f)
+            features["metadata"]["version"]["essentia_build_sha"] = shared_dict["essentia_build_sha"]
+            with open(pending_tmpname, "w", encoding="utf-8") as f:
+                json.dump(features, f, indent=3)
+        except FileNotFoundError:
+            extraction_timestamp = time.time()
+            state_queue.put((tmpname, "failed", "extraction", extraction_timestamp-pending_timestamp))
+            print()
+            print(out)
+            return
     else:
         retcode = 0
 

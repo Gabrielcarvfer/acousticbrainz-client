@@ -56,15 +56,14 @@ def file_state_thread(shared_dict):
         else:
             msg += ("\t%s submission is pending" % (filename))
             color = MAGENTA_CHARACTER
-        sys.stdout.write("%s%s%s\n" % (color, msg, RESET_CHARACTER))
-        sys.stdout.flush()
+        print("%s%s%s" % (color, msg, RESET_CHARACTER))
     if len(shared_dict["processed_files"]) > 0:
         del filename, result, msg, color
 
     print()
     print("Currently processed files:")
 
-    while not shared_dict["end"] or not shared_dict["file_to_process_queue"].empty():
+    while not shared_dict["end"] and not shared_dict["file_to_process_queue"].empty():
         filename, state, error, time_to_process = shared_dict["file_state_queue"].get()
         if filename == "END":
             break
@@ -102,26 +101,28 @@ def file_state_thread(shared_dict):
             msg += ("features are being extracted. ")
             color = CYAN_CHARACTER
         msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted, extracted+remaining_jobs, estimated_remaining_time))
-        sys.stdout.write("%s%s%s\n" % (color, msg, RESET_CHARACTER))
-        sys.stdout.flush()
+        print("%s%s%s" % (color, msg, RESET_CHARACTER))
 
-        # After 10 jobs, re-estimate time to finish
-        if (extracted % 10) == 1:
-            seconds = (total_extraction_time / extracted) * remaining_jobs
-            days = int(seconds/86400)
-            seconds = seconds - days*86400
-            hours = int(seconds/3600)
-            seconds = seconds - hours*3600
-            minutes = int(seconds/60)
-            estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
-            del seconds, minutes, hours, days
+        # Skip time to finish estimate
+        if extracted == 0:
+            continue
+
+        # Re-estimate time to finish
+        seconds = (total_extraction_time / extracted) * remaining_jobs
+        days = int(seconds/86400)
+        seconds = seconds - days*86400
+        hours = int(seconds/3600)
+        seconds = seconds - hours*3600
+        minutes = int(seconds/60)
+        estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
+        del seconds, minutes, hours, days
 
 
 def file_processor_thread(shared_dict):
     from abz.acousticbrainz import process_file
 
     # Check for files to process inside the queue
-    while True:
+    while not shared_dict["end"]:
         file_to_process = shared_dict["file_to_process_queue"].get()
         if file_to_process == "END":
             break
@@ -210,7 +211,6 @@ def main(paths, offline, reprocess_failed, num_threads):
     for filename in files_to_process:
         shared_dict["file_to_process_queue"].put((filename))
 
-
     threads = []
     # Create file_state_thread to keep up with CLI and GUI updates
     threads.append(Thread(target=file_state_thread, args=(shared_dict,)))
@@ -223,14 +223,21 @@ def main(paths, offline, reprocess_failed, num_threads):
     # Release the kraken
     for thread in threads:
         thread.start()
+
     for thread in threads[1:]:
-        thread.join()
+        try:
+            thread.join()
+        except Exception:
+            pass
 
     # Wake up file state thread and let it know the program is ending
     shared_dict["end"] = True
     shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
 
-    print("We are done here.")
+    # Wait for state thread to join
+    thread[0].join()
+
+    print("We are done here. Have a good day.")
 
 
 if __name__ == "__main__":
