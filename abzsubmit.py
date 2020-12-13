@@ -210,28 +210,25 @@ def main(paths, offline, reprocess_failed, num_threads):
     for filename in files_to_process:
         shared_dict["file_to_process_queue"].put((filename))
 
-    try:
-        threads = []
-        # Create file_state_thread to keep up with CLI and GUI updates
-        threads.append(Thread(target=file_state_thread, args=(shared_dict,)))
 
-        # Create file_processor_thread to keep up with feature extraction
-        for _ in range(num_threads):
-            threads.append(Thread(target=file_processor_thread, args=(shared_dict,)))
-            shared_dict["file_to_process_queue"].put(("END"))  # marker for threads to die at the end of queue
+    threads = []
+    # Create file_state_thread to keep up with CLI and GUI updates
+    threads.append(Thread(target=file_state_thread, args=(shared_dict,)))
 
+    # Create file_processor_thread to keep up with feature extraction
+    for _ in range(num_threads):
+        threads.append(Thread(target=file_processor_thread, args=(shared_dict,)))
+        shared_dict["file_to_process_queue"].put(("END"))  # marker for threads to die at the end of queue
 
-        # Release the kraken
-        for thread in threads:
-            thread.start()
-        for thread in threads[1:]:
-            thread.join()
-        shared_dict["end"] = True
-        shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
+    # Release the kraken
+    for thread in threads:
+        thread.start()
+    for thread in threads[1:]:
+        thread.join()
 
-    except KeyboardInterrupt:
-        # Prematurely interrupt workers
-        pass
+    # Wake up file state thread and let it know the program is ending
+    shared_dict["end"] = True
+    shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
 
     print("We are done here.")
 
