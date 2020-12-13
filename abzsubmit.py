@@ -25,6 +25,7 @@ def create_folder(path):
         os.mkdir(path)
 
 def file_state_thread(shared_dict):
+    sys.stdout.reconfigure(encoding='utf-8')  # make sure to use utf-8 encoding on windows
     RESET_CHARACTER = "\x1b[0m"
     RED_CHARACTER = "\x1b[31m"
     GREEN_CHARACTER = "\x1b[32m"
