@@ -41,7 +41,7 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
 
     # Add files to process to the file_to_process_queue
     for filename in files_to_process:
-        shared_dict["file_to_process_queue"].put((filename))
+        shared_dict["file_to_process_queue"].put(filename)
 
     threads = []
     # Create file_state_thread to keep up with CLI and GUI updates

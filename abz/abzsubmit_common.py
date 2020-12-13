@@ -17,7 +17,7 @@ supported_extensions = ["mp3", "mp2",  "m2a", "ogg", "oga", "flac", "mp4", "m4a"
                         ]
 
 
-def parse_arguments():
+def parse_arguments(cli=True):
     import argparse
     from multiprocessing import cpu_count
 
@@ -35,7 +35,7 @@ def parse_arguments():
                         help='Path to streaming_extractor_music')
     parser.add_argument('-p', '--path-list', nargs="*")
 
-    if len(sys.argv) < 2:
+    if cli and len(sys.argv) < 2:
         parser.print_help()
         sys.exit(1)
 
@@ -58,17 +58,18 @@ def precompute_extractor_sha(essentia_path):
 
 def create_folder_structure():
     # Create folder structure for failed/pending/successful submissions
-    create_folder("../features")
-    create_folder("../features/failed/")
-    create_folder("../features/failed/nombid")
-    create_folder("../features/failed/badmbid")
-    create_folder("../features/failed/extraction")
-    create_folder("../features/failed/unknownerror")
-    create_folder("../features/failed/submission")
-    create_folder("../features/failed/jsonerror")
-    create_folder("../features/pending/")
-    create_folder("../features/duplicate/")
-    create_folder("../features/success/")
+    create_folder("./features")
+    create_folder("./features/failed")
+    create_folder("./features/failed/nombid")
+    create_folder("./features/failed/badmbid")
+    create_folder("./features/failed/extraction")
+    create_folder("./features/failed/unknownerror")
+    create_folder("./features/failed/submission")
+    create_folder("./features/failed/jsonerror")
+    create_folder("./features/failed/notrackid")
+    create_folder("./features/pending")
+    create_folder("./features/duplicate")
+    create_folder("./features/success")
 
 
 def create_shared_dictionary(essentia_path, offline, host_address):
@@ -112,6 +113,7 @@ def scan_previously_processed_features():
 
 def retry_submitting_features(processed_files_dict):
     # Retry sending previously saved features by moving them to the pending folder
+    import shutil
     resubmit = []
     for (filename, (state, error)) in processed_files_dict.items():
         if state == "failed" and error == "submission":
@@ -128,6 +130,7 @@ def retry_submitting_features(processed_files_dict):
 
 def reprocess_failed_features(processed_files_dict):
     # Reprocess previously saved features that failed
+    import shutil
     resubmit = []
     for (filename, (state, error)) in processed_files_dict.items():
         if state == "failed":
@@ -142,7 +145,10 @@ def reprocess_failed_features(processed_files_dict):
     return processed_files_dict
 
 
-def file_state_thread(shared_dict):
+def file_state_thread(shared_dict, gui_queue=None):
+    import time
+    cli = True if gui_queue is None else False
+
     sys.stdout.reconfigure(encoding='utf-8')  # make sure to use utf-8 encoding on windows
     RESET_CHARACTER = "\x1b[0m"
     RED_CHARACTER = "\x1b[31m"
@@ -181,7 +187,7 @@ def file_state_thread(shared_dict):
     print()
     print("Currently processed files:")
 
-    while not shared_dict["end"] and not shared_dict["file_to_process_queue"].empty():
+    while not shared_dict["end"] or not shared_dict["file_to_process_queue"].empty():
         filename, state, error, time_to_process = shared_dict["file_state_queue"].get()
         if filename == "END":
             break
@@ -192,6 +198,10 @@ def file_state_thread(shared_dict):
         # Filename has _.json appended (feature output)
         filename = filename[:-6]
         processing_sheet[filename] = (state, error)
+
+        # If gui, update tables based on processing sheet
+        if not cli:
+            gui_queue.put((filename, state))
 
         # Unused, but allows to keep track of processing time
         if state == "success" or error == "submission":
@@ -218,23 +228,22 @@ def file_state_thread(shared_dict):
         else:
             msg += ("features are being extracted. ")
             color = CYAN_CHARACTER
-        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted, total_jobs, estimated_remaining_time))
+        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted+failed+submitted, total_jobs, estimated_remaining_time))
         print("%s%s%s" % (color, msg, RESET_CHARACTER))
 
-        # Skip time to finish estimate
-        if extracted == 0:
-            continue
-
         # Re-estimate time to finish
-        seconds = (total_extraction_time / extracted) * (total_jobs-extracted)
-        days = int(seconds/86400)
-        seconds = seconds - days*86400
-        hours = int(seconds/3600)
-        seconds = seconds - hours*3600
-        minutes = int(seconds/60)
-        estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
-        del seconds, minutes, hours, days
+        if extracted > 1:
+            seconds = (total_extraction_time / extracted) * (total_jobs-extracted)
+            days = int(seconds/86400)
+            seconds = seconds - days*86400
+            hours = int(seconds/3600)
+            seconds = seconds - hours*3600
+            minutes = int(seconds/60)
+            estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
+            del seconds, minutes, hours, days
 
+        # Yield quantum
+        time.sleep(0)
 
 def file_processor_thread(shared_dict):
     from abz.acousticbrainz import process_file

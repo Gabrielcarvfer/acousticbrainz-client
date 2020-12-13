@@ -93,7 +93,14 @@ def process_file(shared_dict, filepath, state_queue):
         print(out)
     else:
         state_queue.put((tmpname, "extracted", "", extraction_timestamp-pending_timestamp))
-        if os.path.isfile(pending_tmpname) and not shared_dict["offline"]:
+        # Previously processed files won't get reprocessed to save up computational time and server requests
+        duplicate = False
+        if tmpname in shared_dict["processed_files"]:
+            if shared_dict["processed_files"][tmpname][0] == "duplicate":
+                state_queue.put((tmpname, "duplicate", "", extraction_timestamp-pending_timestamp))
+                return
+
+        if not shared_dict["offline"]:
             try:
                 with open(pending_tmpname, "r") as f:
                     features = json.load(f)
@@ -131,6 +138,10 @@ def process_file(shared_dict, filepath, state_queue):
             except ValueError:
                 shutil.move(pending_tmpname, "features/failed/jsonerror/"+tmpname)
                 state_queue.put((tmpname, "failed", "jsonerror", extraction_timestamp-pending_timestamp))
+                pass
+            except KeyError:
+                shutil.move(pending_tmpname, "features/failed/notrackid/"+tmpname)
+                state_queue.put((tmpname, "failed", "notrackid", extraction_timestamp-pending_timestamp))
                 pass
 
 
