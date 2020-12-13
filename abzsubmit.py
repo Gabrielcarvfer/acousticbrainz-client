@@ -24,12 +24,115 @@ def create_folder(path):
     if not os.path.exists(path):
         os.mkdir(path)
 
-def main(paths, offline, reprocess_failed):
-    from abz.acousticbrainz import scan_files_to_process, process_file
-    import multiprocessing as mp
-    import multiprocessing.dummy as dummy
+def file_state_thread(shared_dict):
+    RESET_CHARACTER = "\x1b[0m"
+    RED_CHARACTER = "\x1b[31m"
+    GREEN_CHARACTER = "\x1b[32m"
+    MAGENTA_CHARACTER = "\x1b[35m"
+    CYAN_CHARACTER = "\x1b[36m"
+
+    processing_sheet = {}
+    processing_times = {"extraction": [],
+                        "submission": []
+                        }
+    extracted = 0
+    submitted = 0
+    failed = 0
+    remaining_jobs = 0
+    estimated_remaining_time = ("%.0fd:%.0fh:%.0fm" % (0, 0, 0))
+    total_extraction_time = 0.0
+
+    print("Previously processed files include:")
+    for (filename, result) in shared_dict["processed_files"].items():
+        filename = filename[:-6]
+        msg = ""
+        if result[0] == "success":
+            msg += ("\t%s was submitted" % (filename))
+            color = GREEN_CHARACTER
+        elif result[0] == "failed":
+            msg += ("\t%s failed with error %s" % (filename, result[1]))
+            color = RED_CHARACTER
+        else:
+            msg += ("\t%s submission is pending" % (filename))
+            color = MAGENTA_CHARACTER
+        sys.stdout.write("%s%s%s\n" % (color, msg, RESET_CHARACTER))
+        sys.stdout.flush()
+    if len(shared_dict["processed_files"]) > 0:
+        del filename, result, msg, color
+
+    print()
+    print("Currently processed files:")
+
+    while not shared_dict["end"] or not shared_dict["file_to_process_queue"].empty():
+        filename, state, error, time_to_process = shared_dict["file_state_queue"].get()
+        if filename == "END":
+            break
+        shared_dict["file_state_queue"].task_done()
+
+        remaining_jobs = max(shared_dict["file_to_process_queue"].qsize(), remaining_jobs)
+
+        # Filename has _.json appended (feature output)
+        filename = filename[:-6]
+        processing_sheet[filename] = (state, error)
+
+        # Unused, but allows to keep track of processing time
+        if state == "success" or error == "submission":
+            processing_times["submission"].append(time_to_process)
+        else:
+            processing_times["extraction"].append(time_to_process)
+            total_extraction_time += time_to_process
+
+        # Account for finished jobs
+        msg = "\t%s " % filename
+        color = RESET_CHARACTER
+        if state == "success":
+            submitted += 1
+            msg += ("was %s. " % ("submitted" if error == "" else " a duplicate"))
+            color = GREEN_CHARACTER
+        elif state == "extracted":
+            extracted += 1
+            msg += ("was extracted. ")
+            color = MAGENTA_CHARACTER
+        elif state == "failed":
+            failed += 1
+            msg += ("failed with error %s. " % error)
+            color = RED_CHARACTER
+        else:
+            msg += ("features are being extracted. ")
+            color = CYAN_CHARACTER
+        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted, extracted+remaining_jobs, estimated_remaining_time))
+        sys.stdout.write("%s%s%s\n" % (color, msg, RESET_CHARACTER))
+        sys.stdout.flush()
+
+        # After 10 jobs, re-estimate time to finish
+        if (extracted % 10) == 1:
+            seconds = (total_extraction_time / extracted) * remaining_jobs
+            days = int(seconds/86400)
+            seconds = seconds - days*86400
+            hours = int(seconds/3600)
+            seconds = seconds - hours*3600
+            minutes = int(seconds/60)
+            estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
+            del seconds, minutes, hours, days
+
+
+def file_processor_thread(shared_dict):
+    from abz.acousticbrainz import process_file
+
+    # Check for files to process inside the queue
+    while True:
+        file_to_process = shared_dict["file_to_process_queue"].get()
+        if file_to_process == "END":
+            break
+        process_file(shared_dict, file_to_process, shared_dict["file_state_queue"])
+        shared_dict["file_to_process_queue"].task_done()
+
+
+def main(paths, offline, reprocess_failed, num_threads):
+    from abz.acousticbrainz import scan_files_to_process
     import hashlib
-    from threading import Lock
+    from queue import Queue
+    from threading import Thread
 
     # Precompute extractor sha1
     h = hashlib.sha1()
@@ -46,7 +149,9 @@ def main(paths, offline, reprocess_failed):
     shared_dict["essentia_build_sha"] = essentia_build_sha
     shared_dict["offline"] = offline
     shared_dict["host"] = host_address
-    shared_dict["lock"] = Lock()
+    shared_dict["file_to_process_queue"] = Queue()
+    shared_dict["file_state_queue"] = Queue()
+    shared_dict["end"] = False
     del essentia_build_sha
 
     # Create folder structure for failed/pending/successful submissions
@@ -100,23 +205,44 @@ def main(paths, offline, reprocess_failed):
         if len(resubmit) > 0:
             del filename, resubmit
 
+    # Add files to process to the file_to_process_queue
+    for filename in files_to_process:
+        shared_dict["file_to_process_queue"].put((filename))
+
     try:
-        # Pass shared dictionary and files to process to worker threads
-        with dummy.Pool(processes=mp.cpu_count()-1) as pool:
-            pool.starmap(process_file, zip([shared_dict]*len(files_to_process), files_to_process))
+        threads = []
+        # Create file_state_thread to keep up with CLI and GUI updates
+        threads.append(Thread(target=file_state_thread, args=(shared_dict,)))
+
+        # Create file_processor_thread to keep up with feature extraction
+        for _ in range(num_threads):
+            threads.append(Thread(target=file_processor_thread, args=(shared_dict,)))
+            shared_dict["file_to_process_queue"].put(("END"))  # marker for threads to die at the end of queue
+
+
+        # Release the kraken
+        for thread in threads:
+            thread.start()
+        for thread in threads[1:]:
+            thread.join()
+        shared_dict["end"] = True
+        shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
+
     except KeyboardInterrupt:
         # Prematurely interrupt workers
         pass
 
-    print()
+    print("We are done here.")
 
 
 if __name__ == "__main__":
-    from multiprocessing import freeze_support
+    from multiprocessing import freeze_support, cpu_count
     freeze_support()
 
     import argparse
     parser = argparse.ArgumentParser(description='Extract acoustic features from songs.')
+    parser.add_argument('-j', '--jobs', type=int, default=(cpu_count()-1),
+                        help='Number of parallel jobs to execute')
     parser.add_argument('-o', '--offline', type=bool, default=False,
                         help='Extract features but skip submission (default: False)')
     parser.add_argument('-rf', '--reprocess-failed', type=bool, default=False,
@@ -129,4 +255,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args.path_list, args.offline, args.reprocess_failed)
+    main(args.path_list, args.offline, args.reprocess_failed, args.jobs)

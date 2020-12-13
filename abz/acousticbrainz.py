@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import threading
 import uuid
 
@@ -17,30 +18,6 @@ except ImportError:
 
 
 from abz import compat
-
-VERBOSE = False
-
-RESET = "\x1b[0m"
-RED = "\x1b[31m"
-GREEN = "\x1b[32m"
-
-
-def _update_progress(lock, msg, status="...", colour=RESET):
-    with lock:
-        if VERBOSE:
-            sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
-            print(msg.encode("ascii", "ignore"))
-        else:
-            sys.stdout.write("%s[%-10s]%s " % (colour, status, RESET))
-            sys.stdout.write("%s\x1b[K\r" % msg)
-            sys.stdout.flush()
-
-
-def _start_progress(lock, msg, status="...", colour=RESET):
-    with lock:
-        print()
-    _update_progress(lock, msg, status, colour)
-
 
 def is_valid_uuid(u):
     try:
@@ -67,11 +44,12 @@ def submit_features(host, recordingid, features):
     r.raise_for_status()
 
 
-def process_file(shared_dict, filepath):
-    _start_progress(shared_dict["lock"], filepath)
-
+def process_file(shared_dict, filepath, state_queue):
     tmpname = os.path.basename(filepath)+'_.json'
     pending_tmpname = "features/pending/"+tmpname
+
+    state_queue.put((tmpname, "pending", "", 0.0))
+    pending_timestamp = time.time()
 
     # If features haven't been extracted yet, extract them
     if tmpname not in shared_dict["processed_files"]:
@@ -89,23 +67,26 @@ def process_file(shared_dict, filepath):
     else:
         retcode = 0
 
+    extraction_timestamp = time.time()
+
     # If we are at this point, the features file will be at features/pending
     if retcode == 2:
-        _update_progress(shared_dict["lock"], filepath, "No MBID", RED)
+        state_queue.put((tmpname, "failed", "nombid", extraction_timestamp-pending_timestamp))
         shutil.move(pending_tmpname, "features/failed/nombid/"+tmpname)
         print()
         print(out)
     elif retcode == 1:
-        _update_progress(shared_dict["lock"], filepath, "Failed extraction", RED)
+        state_queue.put((tmpname, "failed", "extraction", extraction_timestamp-pending_timestamp))
         shutil.move(pending_tmpname, "features/failed/extraction/"+tmpname)
         print()
         print(out)
     elif retcode > 0 or retcode < 0:  # Unknown error, not 0, 1, 2
-        _update_progress(shared_dict["lock"], filepath, "Unknown error %s" % retcode, RED)
+        state_queue.put((tmpname, "failed", "unknownerror", extraction_timestamp-pending_timestamp))
         shutil.move(pending_tmpname, "features/failed/unknownerror/"+tmpname)
         print()
         print(out)
     else:
+        state_queue.put((tmpname, "extracted", "", extraction_timestamp-pending_timestamp))
         if os.path.isfile(pending_tmpname) and not shared_dict["offline"]:
             try:
                 with open(pending_tmpname, "r") as f:
@@ -125,23 +106,25 @@ def process_file(shared_dict, filepath):
                     # Finally, submit features if not duplicates
                     if duplicate:
                         shutil.move(pending_tmpname, "features/success/"+tmpname)
-                        _update_progress(shared_dict["lock"], filepath, "Duplicate", GREEN)
+                        state_queue.put((tmpname, "success", "duplicate", extraction_timestamp-pending_timestamp))
                     else:
                         try:
                             submit_features(shared_dict["host"], recid, features)
+                            submission_timestamp = time.time()
                             shutil.move(pending_tmpname, "features/success/"+tmpname)
-                            _update_progress(shared_dict["lock"], filepath, "Sent", GREEN)
+                            state_queue.put((tmpname, "success", "", submission_timestamp-extraction_timestamp))
                         except requests.exceptions.HTTPError as e:
                             shutil.move(pending_tmpname, "features/failed/submission/"+tmpname)
-                            _update_progress(shared_dict["lock"], filepath, "Error", RED)
+                            submission_timestamp = time.time()
+                            state_queue.put((tmpname, "failed", "submission", submission_timestamp-extraction_timestamp))
                             print()
                             print(e.response.text)
                 else:
-                    _update_progress(shared_dict["lock"], filepath, "Bad MBID", RED)
+                    state_queue.put((tmpname, "failed", "badmbid", extraction_timestamp-pending_timestamp))
                     shutil.move(pending_tmpname, "features/failed/badmbid/"+tmpname)
             except ValueError:
                 shutil.move(pending_tmpname, "features/failed/jsonerror/"+tmpname)
-                _update_progress(shared_dict["lock"], filepath, "JSON error", RED)
+                state_queue.put((tmpname, "failed", "jsonerror", extraction_timestamp-pending_timestamp))
                 pass
 
 
