@@ -8,7 +8,7 @@ def update_entry_from_listbox(window, target_listbox_key, filename):
     for key in ["_PENDING_", "_FAILED_", "_EXTRACTED_", "_DUPLICATE_", "_SUBMITTED_"]:
         try:
             tmp = window[key].Values
-            tmp = tmp.remove(filename)
+            tmp.remove(filename)
             window[key].Update(tmp)
         except ValueError:
             pass
