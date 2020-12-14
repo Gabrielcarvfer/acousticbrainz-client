@@ -14,6 +14,48 @@ def update_entry_from_listbox(window, target_listbox_key, filename):
             pass
     window[target_listbox_key].Update([filename]+window[target_listbox_key].Values)
 
+def options_window():
+    from multiprocessing import cpu_count
+    import os
+    import sys
+    threads = cpu_count()-1
+    layout = [[sg.T("Server address"), sg.Input(sg.user_settings_get_entry('host_address', 'acousticbrainz.org'), k='-IN1-')],
+              [sg.T("Essentia path"),
+               sg.Input(sg.user_settings_get_entry('essentia_path',
+                                                   ("streaming_extractor_music" + ("" if sys.platform != "win32" else ".exe"))),
+                        k='-IN2-')
+               ],
+              [sg.CB('Run offline', sg.user_settings_get_entry('offline', False), k='-CB1-')],
+              [sg.CB('Reprocess failed features', sg.user_settings_get_entry('reprocess_failed', False), k='-CB2-')],
+              [],
+              [sg.T('Number of jobs'),
+               sg.Slider(range=(1.0, float(threads)),
+                         default_value=sg.user_settings_get_entry("num_threads", threads),
+                         k='-SL-',
+                         orientation='h')
+               ],
+              [],
+              [sg.T('Settings file: ' + os.path.basename(sg.user_settings_filename()))],
+              [sg.Button('Save'), sg.Button('Exit without saving', k='Exit')]
+              ]
+    settings_window = sg.Window('Options', layout)
+
+    while True:
+        event, values = settings_window.read()
+        if event in (sg.WINDOW_CLOSED, 'Exit'):
+            break
+        if event == 'Save':
+            # Save some of the values as user settings
+            sg.user_settings_set_entry('host_address', values['-IN1-'])
+            sg.user_settings_set_entry('essentia_path', values['-IN2-'])
+            sg.user_settings_set_entry('offline', values['-CB1-'])
+            sg.user_settings_set_entry('reprocess_failed', values['-CB2-'])
+            sg.user_settings_set_entry('num_threads', values['-SL-'])
+            sg.user_settings_save(filename=os.path.basename(sg.user_settings_filename()), path="./")
+            break
+    sg.popup_ok("You need to restart the program to apply the settings.")
+    settings_window.close()
+
 
 def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_path):
     import os
@@ -31,6 +73,17 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
                                       )
     # Create folder structure for failed/pending/successful submissions
     create_folder_structure()
+
+    # Try to load saved settings
+    if os.path.exists(os.path.basename(sg.user_settings_filename())):
+        sg.user_settings_load(filename=os.path.basename(sg.user_settings_filename()), path="./")
+
+        # File settings overload command line ones
+        host_address = sg.user_settings_get_entry('host_address')
+        essentia_path = sg.user_settings_get_entry('essentia_path')
+        offline = sg.user_settings_get_entry("offline")
+        reprocess_failed = sg.user_settings_get_entry("reprocess_failed")
+        num_threads = int(sg.user_settings_get_entry("num_threads"))
 
     # Create shared dictionary to keep track of processed files
     shared_dict = create_shared_dictionary(essentia_path, offline, host_address)
@@ -52,7 +105,6 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
                 ]
 
     # Define the window's contents
-    #sg.VerticalSeparator(pad=None)
     layout = [[sg.Menu(menu_def, tearoff=False, pad=(200, 1))],
               [sg.Frame('Pending',    [[sg.LB(values=[], key="_PENDING_", size=(35, 20)), ], ]),
                sg.Frame('Extracted',  [[sg.LB(values=[], key="_EXTRACTED_", size=(35, 20)), ], ]),
@@ -71,11 +123,11 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
 
     threads = []
     # Create file_state_thread to keep up with CLI and GUI updates
-    threads.append(Thread(target=file_state_thread, args=(shared_dict, gui_queue)))
+    threads.append(Thread(target=file_state_thread, daemon=True, args=(shared_dict, gui_queue)))
 
     # Create file_processor_thread to keep up with feature extraction
     for _ in range(num_threads):
-        threads.append(Thread(target=file_processor_thread, args=(shared_dict,)))
+        threads.append(Thread(target=file_processor_thread, daemon=True, args=(shared_dict,)))
 
     # Release the kraken
     for thread in threads:
@@ -123,6 +175,8 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
             filename = sg.popup_get_file('file to open', no_window=True, file_types=extensions)
             shared_dict["file_to_process_queue"].put(filename)
             #print("Adding file: ", filename)
+        elif event == 'Options':
+            options_window()
         else:
             if not gui_queue.empty():
                 filename, state = gui_queue.get()
