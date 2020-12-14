@@ -111,8 +111,8 @@ def process_file(shared_dict, filepath, state_queue):
 
                     # Finally, submit features if not duplicates
                     if duplicate:
-                        shutil.move(pending_tmpname, "features/success/"+tmpname)
-                        state_queue.put((tmpname, "success", "duplicate", extraction_timestamp-pending_timestamp))
+                        shutil.move(pending_tmpname, "features/duplicate/"+tmpname)
+                        state_queue.put((tmpname, "duplicate", "", extraction_timestamp-pending_timestamp))
                     else:
                         try:
                             submit_features(shared_dict["host"], recid, features)
@@ -134,13 +134,5 @@ def process_file(shared_dict, filepath, state_queue):
                 pass
 
 
-def scan_files_to_process(paths, supported_extensions):
-    files_to_process = []
-    for path in paths:
-        print("Processing %s" % path)
-        for dirpath, dirnames, filenames in os.walk(path):
-            for f in filenames:
-                if f.lower().split(".")[-1] in supported_extensions:
-                    files_to_process.append(os.path.abspath(os.path.join(dirpath, f)))
-    return files_to_process
+
 
