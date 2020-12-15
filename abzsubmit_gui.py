@@ -143,17 +143,19 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
         if result[0] not in processed_groups:
             processed_groups[result[0]] = []
         processed_groups[result[0]].append(filename[:-6])
+
+    state_to_listbox_dict = {
+                            'pending': "_PENDING_",
+                            'failed': "_FAILED_",
+                            'extracted': "_EXTRACTED_",
+                            'duplicate': "_DUPLICATE_",
+                            'success': "_SUBMITTED_",
+                            }
     for group in processed_groups.keys():
-        if group == 'failed':
-            window["_FAILED_"].Update(processed_groups[group])
-        elif group == 'pending':
-            window["_EXTRACTED_"].Update(processed_groups[group])
-        elif group == 'duplicate':
-            window["_DUPLICATE_"].Update(processed_groups[group])
-        elif group == 'success':
-            window["_SUBMITTED_"].Update(processed_groups[group])
-        else:
-            pass
+        try:
+            window[state_to_listbox_dict[group]].Update(processed_groups[group])
+        except KeyError:
+            continue
     if len(processed_groups) > 0:
         del processed_groups
 
@@ -180,17 +182,7 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
             if not gui_queue.empty():
                 filename, state = gui_queue.get()
                 gui_queue.task_done()
-
-                if state == 'pending':
-                    update_entry_from_listbox(window, "_PENDING_", filename)
-                elif state == 'failed':
-                    update_entry_from_listbox(window, "_FAILED_", filename)
-                elif state == 'extracted':
-                    update_entry_from_listbox(window, "_EXTRACTED_", filename)
-                elif state == 'duplicate':
-                    update_entry_from_listbox(window, "_DUPLICATE_", filename)
-                else:
-                    update_entry_from_listbox(window, "_SUBMITTED_", filename)
+                update_entry_from_listbox(window, state_to_listbox_dict[state], filename)
                 processing_sheet[filename] = state
             pass
 
