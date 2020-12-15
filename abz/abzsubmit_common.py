@@ -185,6 +185,7 @@ def file_state_thread(shared_dict, gui_queue=None):
     RESET_CHARACTER = "\x1b[0m"
     RED_CHARACTER = "\x1b[31m"
     GREEN_CHARACTER = "\x1b[32m"
+    YELLOW_CHARACTER = "\x1b[33m"
     MAGENTA_CHARACTER = "\x1b[35m"
     CYAN_CHARACTER = "\x1b[36m"
 
@@ -251,15 +252,18 @@ def file_state_thread(shared_dict, gui_queue=None):
             color = GREEN_CHARACTER
         elif state == "extracted":
             extracted += 1
-            msg += ("was extracted. ")
+            msg += "was extracted. "
             color = MAGENTA_CHARACTER
         elif state == "failed":
             failed += 1
             msg += ("failed with error %s. " % error)
             color = RED_CHARACTER
-        else:
-            msg += ("features are being extracted. ")
+        elif state == "pending":
+            msg += "features are being extracted. "
             color = CYAN_CHARACTER
+        elif state == "duplicate":
+            msg += "features are duplicates. "
+            color = YELLOW_CHARACTER
         msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted+failed+submitted, total_jobs, estimated_remaining_time))
         print("%s%s%s" % (color, msg, RESET_CHARACTER))
 
