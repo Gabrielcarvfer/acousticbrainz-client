@@ -61,6 +61,7 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     shared_dict["end"] = True
     shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
 
+    threads[0].join()
     print("We are done here. Have a good day.")
 
 
