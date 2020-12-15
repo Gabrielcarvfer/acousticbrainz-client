@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+
+# Client for submitting feature files to the AcousticBrainz project
+
+# Copyright 2020 Gabriel Ferreira (@gabrielcarvfer)
+# acousticbrainz-client is available under the terms of the GNU
+# General Public License, version 3 or higher. See COPYING for more details.
+
 import PySimpleGUI as sg
 from abz.abzsubmit_common import supported_extensions
 
