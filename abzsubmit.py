@@ -39,29 +39,24 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     for filename in files_to_process:
         shared_dict["file_to_process_queue"].put(filename)
 
+    # Add number of jobs for proper estimation
+    shared_dict["number_of_jobs_queue"].put(len(files_to_process))
+
     # Create file_state_thread to keep up with CLI and GUI updates
     threads = [Thread(target=file_state_thread, args=(shared_dict,))]
 
     # Create file_processor_thread to keep up with feature extraction
     for _ in range(num_threads):
-        threads.append(Thread(target=file_processor_thread, args=(shared_dict,)))
+        threads.append(Thread(target=file_processor_thread, daemon=True, args=(shared_dict,)))
         shared_dict["file_to_process_queue"].put(("END"))  # marker for threads to die at the end of queue
 
     # Release the kraken
     for thread in threads:
         thread.start()
 
-    for thread in threads[1:]:
-        try:
-            thread.join()
-        except Exception as e:
-            raise e
-
-    # Wake up file state thread and let it know the program is ending
-    shared_dict["end"] = True
-    shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
-
+    # Wait for file state thread
     threads[0].join()
+
     print("We are done here. Have a good day.")
 
 

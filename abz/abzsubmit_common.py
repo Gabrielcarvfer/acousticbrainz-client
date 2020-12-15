@@ -113,6 +113,7 @@ def create_shared_dictionary(essentia_path, offline, host_address):
     shared_dict["host"] = host_address
     shared_dict["file_to_process_queue"] = Queue()
     shared_dict["file_state_queue"] = Queue()
+    shared_dict["number_of_jobs_queue"] = Queue()
     shared_dict["end"] = False
     return shared_dict
 
@@ -220,13 +221,18 @@ def file_state_thread(shared_dict, gui_queue=None):
     print()
     print("Currently processed files:")
 
-    while not shared_dict["end"] or not shared_dict["file_to_process_queue"].empty():
+    while not shared_dict["end"]:
+        # Keep track of jobs
+        if not shared_dict["number_of_jobs_queue"].empty():
+            total_jobs += shared_dict["number_of_jobs_queue"].get()
+            shared_dict["number_of_jobs_queue"].task_done()
+
+        # Dequeue change in file state
         filename, state, error, time_to_process = shared_dict["file_state_queue"].get()
-        if filename == "END":
-            break
         shared_dict["file_state_queue"].task_done()
 
-        total_jobs = max(shared_dict["file_to_process_queue"].qsize()+extracted, total_jobs)
+        if filename == "END":
+            break
 
         # Filename has _.json appended (feature output)
         filename = filename[:-6]
@@ -264,12 +270,16 @@ def file_state_thread(shared_dict, gui_queue=None):
         elif state == "duplicate":
             msg += "features are duplicates. "
             color = YELLOW_CHARACTER
-        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted+failed+submitted, total_jobs, estimated_remaining_time))
+        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted+failed+submitted,
+                                                                total_jobs,
+                                                                estimated_remaining_time)
+                )
         print("%s%s%s" % (color, msg, RESET_CHARACTER))
 
         # Re-estimate time to finish
         if extracted > 1:
             seconds = (total_extraction_time / extracted) * (total_jobs-extracted)
+            seconds = max(seconds, 0)
             days = int(seconds/86400)
             seconds = seconds - days*86400
             hours = int(seconds/3600)
@@ -278,8 +288,11 @@ def file_state_thread(shared_dict, gui_queue=None):
             estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
             del seconds, minutes, hours, days
 
-        # Yield quantum
-        time.sleep(0)
+    # Clean queue
+    while not shared_dict["file_state_queue"].empty():
+        shared_dict["file_state_queue"].get()
+        shared_dict["file_state_queue"].task_done()
+    return
 
 
 def file_processor_thread(shared_dict):
@@ -292,4 +305,12 @@ def file_processor_thread(shared_dict):
             break
         process_file(shared_dict, file_to_process, shared_dict["file_state_queue"])
         shared_dict["file_to_process_queue"].task_done()
+
+    # Clean queue when ending
+    while not shared_dict["file_to_process_queue"].empty():
+        shared_dict["file_to_process_queue"].get()
+        shared_dict["file_to_process_queue"].task_done()
+
+    # Wake up file_state_thread
+    shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
     pass

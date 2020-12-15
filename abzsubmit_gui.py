@@ -173,9 +173,11 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
             files_to_process = scan_files_to_process([path], supported_extensions)
             for filename in files_to_process:
                 shared_dict["file_to_process_queue"].put(filename)
+            shared_dict["number_of_jobs_queue"].put(len(files_to_process))
         elif event == 'Add file':
             filename = sg.popup_get_file('file to open', no_window=True, file_types=extensions)
             shared_dict["file_to_process_queue"].put(filename)
+            shared_dict["number_of_jobs_queue"].put(1)
         elif event == 'Options':
             options_window()
         else:
