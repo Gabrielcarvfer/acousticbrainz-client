@@ -114,7 +114,7 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
                sg.Frame('Submitted',  [[sg.LB(values=[], key="_SUBMITTED_", size=(35, 20)), ], ]),
                ],
               [sg.ProgressBar(max_value=100, orientation='h', size=(85, 20), key='_PROGBAR_'),
-               sg.Text("Job 0/0 - Remaining time:", size=(30, 1), key="_REMAINING_"),
+               sg.Text("Job 0/0 - Remaining time:", size=(35, 1), key="_REMAINING_"),
                ]
               ]
 
