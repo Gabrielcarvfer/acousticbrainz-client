@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 import threading
 import uuid
@@ -18,6 +17,7 @@ except ImportError:
 
 
 from abz import compat
+
 
 def is_valid_uuid(u):
     try:
@@ -32,9 +32,10 @@ def run_extractor(essentia_path, input_path, output_path):
     args = [extractor, input_path, output_path]
 
     with subprocess.Popen(args, stderr=subprocess.STDOUT, stdout=subprocess.PIPE) as p:
-       (out, err) = p.communicate()
-       retcode = p.returncode
-       return retcode, out.decode("utf-8")
+        (out, err) = p.communicate()
+        retcode = p.returncode
+        return retcode, out.decode("utf-8")
+
 
 def submit_features(host, recordingid, features):
     featstr = json.dumps(features)
@@ -143,7 +144,3 @@ def process_file(shared_dict, filepath, state_queue):
                 shutil.move(pending_tmpname, "features/failed/notrackid/"+tmpname)
                 state_queue.put((tmpname, "failed", "notrackid", extraction_timestamp-pending_timestamp))
                 pass
-
-
-
-

@@ -14,6 +14,7 @@ def update_entry_from_listbox(window, target_listbox_key, filename):
             pass
     window[target_listbox_key].Update([filename]+window[target_listbox_key].Values)
 
+
 def options_window():
     from multiprocessing import cpu_count
     import os
@@ -121,9 +122,8 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     processing_sheet = {}
     gui_queue = Queue()
 
-    threads = []
     # Create file_state_thread to keep up with CLI and GUI updates
-    threads.append(Thread(target=file_state_thread, daemon=True, args=(shared_dict, gui_queue)))
+    threads = [Thread(target=file_state_thread, daemon=True, args=(shared_dict, gui_queue))]
 
     # Create file_processor_thread to keep up with feature extraction
     for _ in range(num_threads):
@@ -133,8 +133,10 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     for thread in threads:
         thread.start()
 
+    # Render main window
     window.read(timeout=0.1)
 
+    # Populate listboxes with previously processed entries
     processed_groups = {}
     for (filename, result) in shared_dict["processed_files"].items():
         processing_sheet[filename] = result[0]
@@ -163,18 +165,15 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
         if event == sg.WINDOW_CLOSED or event == 'Quit':
             break
 
-
         # ------ Process menu choices ------ #
         if event == 'Add directory':
             path = sg.popup_get_folder('folder to open', no_window=True)
             files_to_process = scan_files_to_process([path], supported_extensions)
             for filename in files_to_process:
                 shared_dict["file_to_process_queue"].put(filename)
-            #print("Adding directory: ", path)
         elif event == 'Add file':
             filename = sg.popup_get_file('file to open', no_window=True, file_types=extensions)
             shared_dict["file_to_process_queue"].put(filename)
-            #print("Adding file: ", filename)
         elif event == 'Options':
             options_window()
         else:

@@ -10,7 +10,7 @@ import os
 import sys
 
 
-#host_port = 4000
+# host_port = 4000
 supported_extensions = ["mp3", "mp2",  "m2a", "ogg", "oga", "flac", "mp4", "m4a", "m4r",
                         "m4b", "m4p",  "aac", "wma", "asf",  "mpc",  "wv", "spx", "tta",
                         "3g2", "aif", "aiff", "ape",
@@ -244,6 +244,7 @@ def file_state_thread(shared_dict, gui_queue=None):
 
         # Yield quantum
         time.sleep(0)
+
 
 def file_processor_thread(shared_dict):
     from abz.acousticbrainz import process_file

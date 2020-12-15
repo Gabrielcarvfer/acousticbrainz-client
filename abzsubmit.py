@@ -7,10 +7,6 @@
 # acousticbrainz-client is available under the terms of the GNU
 # General Public License, version 3 or higher. See COPYING for more details.
 
-import os
-import shutil
-import sys
-
 
 def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_path):
     from threading import Thread
@@ -43,9 +39,8 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     for filename in files_to_process:
         shared_dict["file_to_process_queue"].put(filename)
 
-    threads = []
     # Create file_state_thread to keep up with CLI and GUI updates
-    threads.append(Thread(target=file_state_thread, args=(shared_dict,)))
+    threads = [Thread(target=file_state_thread, args=(shared_dict,))]
 
     # Create file_processor_thread to keep up with feature extraction
     for _ in range(num_threads):
@@ -59,15 +54,12 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
     for thread in threads[1:]:
         try:
             thread.join()
-        except Exception:
-            pass
+        except Exception as e:
+            raise e
 
     # Wake up file state thread and let it know the program is ending
     shared_dict["end"] = True
     shared_dict["file_state_queue"].put(["END"]*4)  # marker to kill state thread after finished processing features
-
-    # Wait for state thread to join
-    threads[0].join()
 
     print("We are done here. Have a good day.")
 
