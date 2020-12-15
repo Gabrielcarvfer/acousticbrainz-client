@@ -113,6 +113,9 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
                sg.Frame('Duplicate',  [[sg.LB(values=[], key="_DUPLICATE_", size=(35, 20)), ], ]),
                sg.Frame('Submitted',  [[sg.LB(values=[], key="_SUBMITTED_", size=(35, 20)), ], ]),
                ],
+              [sg.ProgressBar(max_value=100, orientation='h', size=(85, 20), key='_PROGBAR_'),
+               sg.Text("Job 0/0 - Remaining time:", size=(30, 1), key="_REMAINING_"),
+               ]
               ]
 
     # Create the main window
@@ -120,10 +123,11 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
 
     # Keep track of file states for GUI updates
     processing_sheet = {}
-    gui_queue = Queue()
+    shared_dict["gui_queue"] = Queue()
+    shared_dict["state_queue"] = Queue()
 
     # Create file_state_thread to keep up with CLI and GUI updates
-    threads = [Thread(target=file_state_thread, daemon=True, args=(shared_dict, gui_queue))]
+    threads = [Thread(target=file_state_thread, daemon=True, args=(shared_dict,))]
 
     # Create file_processor_thread to keep up with feature extraction
     for _ in range(num_threads):
@@ -181,11 +185,18 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
         elif event == 'Options':
             options_window()
         else:
-            if not gui_queue.empty():
-                filename, state = gui_queue.get()
-                gui_queue.task_done()
+            if not shared_dict["gui_queue"].empty():
+                filename, state = shared_dict["gui_queue"].get()
+                shared_dict["gui_queue"].task_done()
                 update_entry_from_listbox(window, state_to_listbox_dict[state], filename)
                 processing_sheet[filename] = state
+            if not shared_dict["state_queue"].empty():
+                extracted, total_jobs, time_estimate = shared_dict["state_queue"].get()
+                shared_dict["state_queue"].task_done()
+                time_remaining = ("Job %d/%d - Remaining time: %s" % (extracted, total_jobs, time_estimate))
+                window["_REMAINING_"].Update(value=time_remaining)
+                zero = total_jobs == 0
+                window["_PROGBAR_"].Update(extracted*100/(total_jobs+zero))
             pass
 
     # Finish up by removing from the screen

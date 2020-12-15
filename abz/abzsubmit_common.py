@@ -114,6 +114,8 @@ def create_shared_dictionary(essentia_path, offline, host_address):
     shared_dict["file_to_process_queue"] = Queue()
     shared_dict["file_state_queue"] = Queue()
     shared_dict["number_of_jobs_queue"] = Queue()
+    shared_dict["gui_queue"] = None
+    shared_dict["state_queue"] = None
     shared_dict["end"] = False
     return shared_dict
 
@@ -178,9 +180,9 @@ def reprocess_failed_features(processed_files_dict):
     return processed_files_dict
 
 
-def file_state_thread(shared_dict, gui_queue=None):
+def file_state_thread(shared_dict):
     import time
-    cli = True if gui_queue is None else False
+    cli = True if shared_dict["gui_queue"] is None else False
 
     sys.stdout.reconfigure(encoding='utf-8')  # make sure to use utf-8 encoding on windows
     RESET_CHARACTER = "\x1b[0m"
@@ -240,7 +242,7 @@ def file_state_thread(shared_dict, gui_queue=None):
 
         # If gui, update tables based on processing sheet
         if not cli:
-            gui_queue.put((filename, state))
+            shared_dict["gui_queue"].put((filename, state))
 
         # Unused, but allows to keep track of processing time
         if state == "success" or error == "submission":
@@ -253,7 +255,6 @@ def file_state_thread(shared_dict, gui_queue=None):
         msg = "\t%s " % filename
         color = RESET_CHARACTER
         if state == "success":
-            submitted += 1
             msg += ("was %s. " % ("submitted" if error == "" else " a duplicate"))
             color = GREEN_CHARACTER
         elif state == "extracted":
@@ -261,7 +262,6 @@ def file_state_thread(shared_dict, gui_queue=None):
             msg += "was extracted. "
             color = MAGENTA_CHARACTER
         elif state == "failed":
-            failed += 1
             msg += ("failed with error %s. " % error)
             color = RED_CHARACTER
         elif state == "pending":
@@ -270,7 +270,7 @@ def file_state_thread(shared_dict, gui_queue=None):
         elif state == "duplicate":
             msg += "features are duplicates. "
             color = YELLOW_CHARACTER
-        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted+failed+submitted,
+        msg += ("Job %d/%d - Estimated remaining time is %s" % (extracted,
                                                                 total_jobs,
                                                                 estimated_remaining_time)
                 )
@@ -287,6 +287,9 @@ def file_state_thread(shared_dict, gui_queue=None):
             minutes = int(seconds/60)
             estimated_remaining_time = ("%.dd:%dh:%dm" % (days, hours, minutes))
             del seconds, minutes, hours, days
+            
+        if not cli:
+            shared_dict["state_queue"].put((extracted, total_jobs, estimated_remaining_time))
 
     # Clean queue
     while not shared_dict["file_state_queue"].empty():
