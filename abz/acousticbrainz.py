@@ -65,6 +65,23 @@ def process_file(shared_dict, filepath, state_queue):
 
     # If features haven't been extracted yet, extract them
     if tmpname not in shared_dict["processed_files"]:
+        # If we are offline, we can use mutagen to check if the recording already exists in the
+        # acousticbrainz server and skip feature extraction
+        if not shared_dict["offline"]:
+            try:
+                import mutagen
+                f = mutagen.File(filepath)
+                recid = str(f.tags['UFID:http://musicbrainz.org'].data.decode("utf-8"))
+
+                # Check if track ID already exists
+                duplicate = duplicated_features(shared_dict["host"], recid, shared_dict["essentia_version"])
+                if duplicate:
+                    state_queue.put((tmpname, "duplicate", "matching feature set", 0.0))
+                    return
+            except Exception as e:
+                # Whatever, proceed to the slow path
+                pass
+
         # The extractor doesn't seem to handle utf-8 properly, so we write to a temporary file
         thread_tmpname = str(threading.get_ident())+".json"
         retcode, out = run_extractor(shared_dict["essentia_path"], filepath, thread_tmpname)
