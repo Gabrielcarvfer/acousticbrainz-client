@@ -56,6 +56,37 @@ def precompute_extractor_sha(essentia_path):
     return h.hexdigest()
 
 
+def check_extractor_version(essentia_path):
+    import subprocess
+    """ returns something like this (at least on windows)
+    'Error: wrong number of arguments\r\n
+    Usage: streaming_extractor_music.exe input_audiofile output_textfile [profile]\r\n
+    \r\n
+    Music extractor version 'music 1.0'\r\n
+    built with Essentia version v2.1_beta2-1-ge3940c0\r\n
+    \r\n
+    '
+    """
+    ret = subprocess.run([essentia_path], stdout=subprocess.PIPE)
+
+    """ filters the useful line
+    'built with Essentia version v2.1_beta2-1-ge3940c0\r'
+    """
+    out = ret.stdout.decode(sys.stdout.encoding).split('\n')[-2]
+
+    """ removes carrier return (if it is there)
+    'built with Essentia version v2.1_beta2-1-ge3940c0\r'
+    """
+    cr = out[-1] == '\r'
+    out = out[:-cr]
+
+    """ tokenize and pick last item (a.k.a) version number
+    'built with Essentia version **v2.1_beta2-1-ge3940c0**'
+    """
+    out = out.split(' ')[-1]
+    return out
+
+
 def create_folder_structure():
     # Create folder structure for failed/pending/successful submissions
     create_folder("./features")
@@ -76,6 +107,7 @@ def create_shared_dictionary(essentia_path, offline, host_address):
     from queue import Queue
     shared_dict = {}
     shared_dict["essentia_path"] = essentia_path
+    shared_dict["essentia_version"] = check_extractor_version(essentia_path)
     shared_dict["essentia_build_sha"] = precompute_extractor_sha(essentia_path)
     shared_dict["offline"] = offline
     shared_dict["host"] = host_address

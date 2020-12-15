@@ -44,6 +44,18 @@ def submit_features(host, recordingid, features):
     r.raise_for_status()
 
 
+def duplicated_features(acoustid_server_address, musicbrainz_trackid, essentia_version):
+    # Check if someone already submitted the acousticbrainz features
+    req = requests.get("https://"+acoustid_server_address+"/"+musicbrainz_trackid+"/low-level").json()
+    is_duplicate = len(req.keys()) > 1
+    if is_duplicate:
+        # If we reached this point, there is an entry for this song, but it may be outdated
+        if req["metadata"]["version"]["essentia_git_sha"] != essentia_version:
+            # If versions do not match, extract features
+            is_duplicate = False
+    return is_duplicate
+
+
 def process_file(shared_dict, filepath, state_queue):
     tmpname = os.path.basename(filepath)+'_.json'
     pending_tmpname = "features/pending/"+tmpname
@@ -95,7 +107,6 @@ def process_file(shared_dict, filepath, state_queue):
     else:
         state_queue.put((tmpname, "extracted", "", extraction_timestamp-pending_timestamp))
         # Previously processed files won't get reprocessed to save up computational time and server requests
-        duplicate = False
         if tmpname in shared_dict["processed_files"]:
             if shared_dict["processed_files"][tmpname][0] == "duplicate":
                 state_queue.put((tmpname, "duplicate", "", extraction_timestamp-pending_timestamp))
@@ -113,9 +124,9 @@ def process_file(shared_dict, filepath, state_queue):
                 if recs:
                     recid = recs[0]
 
-                    # Check if someone already submitted the acousticbrainz features
-                    req = requests.get("https://"+shared_dict["host"]+"/"+recid+"/low-level")
-                    duplicate = len(req.json().keys()) > 1
+                    # If we reached this point, the previous duplicate check
+                    # was skipped due to a different build_sha/offline work
+                    duplicate = duplicated_features(shared_dict["host"], recid, shared_dict["essentia_version"])
 
                     # Finally, submit features if not duplicates
                     if duplicate:
