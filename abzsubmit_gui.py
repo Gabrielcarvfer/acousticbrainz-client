@@ -114,12 +114,13 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
                sg.Frame('Submitted',  [[sg.LB(values=[], key="_SUBMITTED_", size=(35, 20)), ], ]),
                ],
               [sg.ProgressBar(max_value=100, orientation='h', size=(85, 20), key='_PROGBAR_'),
-               sg.Text("Job 0/0 - Remaining time:", size=(35, 1), key="_REMAINING_"),
+               sg.Text("Job 0/0 - Remaining time:", size=(38, 1), key="_REMAINING_"),
                ]
               ]
 
     # Create the main window
-    window = sg.Window('Window Title', layout)
+    window = sg.Window('AcousticBrainz Client', layout)
+    window.set_icon("favicon-256.ico")
 
     # Keep track of file states for GUI updates
     processing_sheet = {}
