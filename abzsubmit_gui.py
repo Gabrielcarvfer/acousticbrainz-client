@@ -148,6 +148,11 @@ def main(paths, offline, reprocess_failed, num_threads, host_address, essentia_p
             processed_groups[result[0]] = []
         processed_groups[result[0]].append(filename[:-6])
 
+        # Continue processing of pending/partially processed features
+        if result[0] in ["pending", "extracted"]:
+            shared_dict["number_of_jobs_queue"].put(1)
+            shared_dict["file_to_process_queue"].put((filename[:-6]))
+
     state_to_listbox_dict = {
                             'pending': "_PENDING_",
                             'failed': "_FAILED_",
