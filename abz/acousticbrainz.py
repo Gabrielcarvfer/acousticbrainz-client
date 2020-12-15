@@ -37,14 +37,20 @@ def run_extractor(essentia_path, input_path, output_path):
         return retcode, out.decode("utf-8")
 
 
-def submit_features(host, recordingid, features):
+def submit_features(host, recordingid, features, api_lock, api_request_delay):
+    with api_lock:
+        time.sleep(api_request_delay)
+
     featstr = json.dumps(features)
     url = compat.urlunparse(('https', host, '/%s/low-level' % recordingid, '', '', ''))
     r = requests.post(url, data=featstr)
     r.raise_for_status()
 
 
-def duplicated_features(acoustid_server_address, musicbrainz_trackid, essentia_version):
+def duplicated_features(acoustid_server_address, musicbrainz_trackid, essentia_version, api_lock, api_request_delay):
+    with api_lock:
+        time.sleep(api_request_delay)
+
     # Check if someone already submitted the acousticbrainz features
     req = requests.get("https://"+acoustid_server_address+"/"+musicbrainz_trackid+"/low-level").json()
     is_duplicate = len(req.keys()) > 1
@@ -74,7 +80,11 @@ def process_file(shared_dict, filepath, state_queue):
                 recid = str(f.tags['UFID:http://musicbrainz.org'].data.decode("utf-8"))
 
                 # Check if track ID already exists
-                duplicate = duplicated_features(shared_dict["host"], recid, shared_dict["essentia_version"])
+                duplicate = duplicated_features(shared_dict["host"],
+                                                recid,
+                                                shared_dict["essentia_version"],
+                                                shared_dict["api_lock"],
+                                                shared_dict["api_request_delay"])
                 if duplicate:
                     state_queue.put((tmpname, "duplicate", "matching feature set", 0.0))
                     return
@@ -143,7 +153,12 @@ def process_file(shared_dict, filepath, state_queue):
 
                     # If we reached this point, the previous duplicate check
                     # was skipped due to a different build_sha/offline work
-                    duplicate = duplicated_features(shared_dict["host"], recid, shared_dict["essentia_version"])
+                    duplicate = duplicated_features(shared_dict["host"],
+                                                    recid,
+                                                    shared_dict["essentia_version"],
+                                                    shared_dict["api_lock"],
+                                                    shared_dict["api_request_delay"]
+                                                    )
 
                     # Finally, submit features if not duplicates
                     if duplicate:
@@ -151,7 +166,12 @@ def process_file(shared_dict, filepath, state_queue):
                         state_queue.put((tmpname, "duplicate", "", extraction_timestamp-pending_timestamp))
                     else:
                         try:
-                            submit_features(shared_dict["host"], recid, features)
+                            submit_features(shared_dict["host"],
+                                            recid,
+                                            features,
+                                            shared_dict["api_lock"],
+                                            shared_dict["api_request_delay"]
+                                            )
                             submission_timestamp = time.time()
                             shutil.move(pending_tmpname, "features/success/"+tmpname)
                             state_queue.put((tmpname, "success", "", submission_timestamp-extraction_timestamp))
@@ -167,8 +187,9 @@ def process_file(shared_dict, filepath, state_queue):
             except ValueError:
                 shutil.move(pending_tmpname, "features/failed/jsonerror/"+tmpname)
                 state_queue.put((tmpname, "failed", "jsonerror", extraction_timestamp-pending_timestamp))
-                pass
             except KeyError:
                 shutil.move(pending_tmpname, "features/failed/notrackid/"+tmpname)
                 state_queue.put((tmpname, "failed", "notrackid", extraction_timestamp-pending_timestamp))
-                pass
+            except FileNotFoundError:
+                state_queue.put((tmpname, "failed", "extraction", extraction_timestamp-pending_timestamp))
+

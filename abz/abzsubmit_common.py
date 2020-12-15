@@ -105,12 +105,15 @@ def create_folder_structure():
 
 def create_shared_dictionary(essentia_path, offline, host_address):
     from queue import Queue
+    from threading import Lock
     shared_dict = {}
     shared_dict["essentia_path"] = essentia_path
     shared_dict["essentia_version"] = check_extractor_version(essentia_path)
     shared_dict["essentia_build_sha"] = precompute_extractor_sha(essentia_path)
     shared_dict["offline"] = offline
     shared_dict["host"] = host_address
+    shared_dict["api_lock"] = Lock()
+    shared_dict["api_request_delay"] = 2  # 0.5 requests per second = 5 requests per 10 seconds
     shared_dict["file_to_process_queue"] = Queue()
     shared_dict["file_state_queue"] = Queue()
     shared_dict["number_of_jobs_queue"] = Queue()
